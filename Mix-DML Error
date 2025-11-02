@@ -1,0 +1,7 @@
+Why we do not insert setup object and non-setup objects in same transaction, why salesforce put this limit ?
+
+Setup vs Non-Setup Objects are:
+Setup Objects =>	User, Profile, PermissionSetAssignment, QueueSObject, etc.	Metadata/configuration level objects — they define how Salesforce is set up, not business data.
+Non-Setup Objects =>	Account, Contact, Opportunity, Custom__c, etc.	Business data — records that users work with in the app.
+
+1.Transaction Integrity and Locking => Setup objects may trigger org-level changes (like permission recalculations or profile updates), while non-setup objects typically only lock rows. Combining them could cause deadlocks or partial commits, which Salesforce’s ACID model forbids.
