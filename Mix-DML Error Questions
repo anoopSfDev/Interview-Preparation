@@ -1,4 +1,59 @@
 Why we do not insert setup object and non-setup objects in same transaction, why salesforce put this limit ?
 
+Salesforce enforces this restriction because setup and non-setup objects reside in separate database tables. 
 Setup Objects =>	User, Profile, PermissionSetAssignment, QueueSObject, etc.	Metadata/configuration level objects — they define how Salesforce is set up, not business data.
 Non-Setup Objects =>	Account, Contact, Opportunity, Custom__c, etc.	Business data — records that users work with in the app.
+
+Reason:
+1. Setup objects belong to a different database context (metadata-level). But, Non-setup objects belong to data-level transactions.
+
+Mixing them can cause data consistency issues, because setup changes may trigger org-wide recalculations or security re-evaluations, while non-setup data transactions are optimized for speed and rollback safety.
+
+Example: If you create a User (setup) and an Account (non-setup) in one transaction and something fails in one part, Salesforce would need to decide how to roll back both metadata and data layers — which is complex and risky.
+
+2. Security and Access Control
+
+Setup objects require “Setup” context access — typically system admin or higher privileges.
+Non-setup objects operate in user context (depending on record sharing, FLS, etc).
+
+Mixing both in the same transaction could allow privilege escalation — e.g., a user could indirectly modify setup-level data from a business transaction.
+
+3. Transaction Integrity and Locking
+
+Setup objects may trigger org-level changes (like permission recalculations or profile updates), while non-setup objects typically only lock rows.
+Combining them could cause deadlocks or partial commits, which Salesforce’s ACID model forbids.
+
+Solution 1: Use ‘System.runAs()’ for Setup Objects
+The ‘System.runAs()’ method allows you to execute code in the context of a specific user. You can use this approach to isolate DML operations specifically for setup objects. Modify the previous example:
+public class MixedDMLExample {
+    public static void createUserAndAccount() {
+        // Create a new User (Setup Object)
+        User newUser = new User(
+            FirstName = 'John',
+            LastName = 'Doe',
+            Email = 'john.doe@example.com',
+            Username = 'john.doe@example.com',
+            Alias = 'jdoe',
+            TimeZoneSidKey = 'America/Los_Angeles',
+            LocaleSidKey = 'en_US',
+            EmailEncodingKey = 'UTF-8',
+            ProfileId = '00eXXXXXXXXXXXXXX', // Replace with a valid Profile ID
+            LanguageLocaleKey = 'en_US'
+        );
+        // Use System.runAs() to isolate the DML operation on the setup object
+        System.runAs(new User(Id = UserInfo.getUserId())) {
+            insert newUser;
+        }
+        // Create a new Account (Non-Setup Object)
+        Account newAccount = new Account(
+            Name = 'Test Account'
+        );
+        insert newAccount; // DML operation on a non-setup object
+    }
+}
+By wrapping the DML operation on the ‘User’ object inside ‘System.runAs()’, you ensure that it runs in a separate context, avoiding the Mixed DML Operation error.
+
+Solution 2: Use Future Methods
+Another approach is to use the ‘@future’ annotation to execute DML operations on setup objects asynchronously. This separates the transactions and avoids the Mixed DML Operation error.
+
+More Referance : https://salesforce.stackexchange.com/questions/361719/what-is-the-reason-that-salesforce-introduced-mixed-dml-exception?utm_source=chatgpt.com
