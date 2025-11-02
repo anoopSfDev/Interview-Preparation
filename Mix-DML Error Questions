@@ -1,0 +1,4 @@
+Why we do not insert setup object and non-setup objects in same transaction, why salesforce put this limit ?
+
+Setup Objects =>	User, Profile, PermissionSetAssignment, QueueSObject, etc.	Metadata/configuration level objects — they define how Salesforce is set up, not business data.
+Non-Setup Objects =>	Account, Contact, Opportunity, Custom__c, etc.	Business data — records that users work with in the app.
