@@ -1,0 +1,100 @@
+🚫 Why You *Cannot* Call a another Batch Inside `start()` (or `execute()`)
+
+There are **architectural and platform safety reasons** behind this restriction.
+
+Let’s go through them step-by-step 👇
+
+---
+
+### **1. Batch Job Context Isolation**
+
+* Each batch runs in a **separate execution context**, with its own limits.
+* When you’re inside `start()` or `execute()`, the system has **not yet completed** the current batch job definition or chunk processing.
+* If you start another batch from inside these methods, it would mean *nesting asynchronous jobs inside a running one* — which Salesforce **disallows** to prevent recursion and infinite job spawning.
+
+💬 *Think of it like trying to schedule a new race while you’re still defining the track for the first one.*
+
+---
+
+### **2. Risk of Infinite or Uncontrolled Job Chaining**
+
+* If batches could be launched from `start()` or `execute()`, developers could easily create **recursive batch calls** (batch inside batch inside batch).
+* That would **overload the Apex job queue**, consuming system resources and violating multi-tenant limits.
+
+That’s why Salesforce only allows launching new asynchronous processes (like another batch) **after** the current one completes — i.e., in the `finish()` method.
+
+---
+
+### **3. Platform Governance and Transaction State**
+
+* The `start()` and `execute()` methods run inside **active transactions**.
+* The platform disallows starting another async job from within the same transaction that hasn’t finished committing.
+* `finish()` runs *after* all those transactions complete — making it a **safe point** to enqueue new jobs.
+
+> You can think of it as Salesforce saying:
+> “Finish what you started before asking for a new job.”
+
+---
+
+### **4. Batch Queue Management**
+
+* The Apex job queue has a **maximum concurrency limit** (usually 5 active batches per org).
+* Allowing nested batch calls in `start()` or `execute()` could break this rule because new jobs would spawn mid-execution.
+* `finish()` ensures the current batch job is **completed and dequeued** before the next one starts, keeping queue order predictable.
+
+---
+
+## ✅ Why It *Is Allowed* in the `finish()` Method
+
+* `finish()` runs **after all batches complete** and the platform has committed results.
+* It runs in a **fresh transaction** (clean context).
+* Safe to enqueue or call:
+
+  * Another batch
+  * Future / Queueable / Scheduled jobs
+
+Example:
+
+```apex
+public class ParentBatch implements Database.Batchable<SObject> {
+
+    public Database.QueryLocator start(Database.BatchableContext bc) {
+        return Database.getQueryLocator([SELECT Id FROM Account]);
+    }
+
+    public void execute(Database.BatchableContext bc, List<Account> scope) {
+        // process accounts here
+    }
+
+    public void finish(Database.BatchableContext bc) {
+        // ✅ Safe: start next batch after this one finishes
+        Database.executeBatch(new ChildBatch(), 200);
+    }
+}
+```
+
+---
+
+## ⚙️ Summary Table
+
+| Method        | Allowed to call another batch? | Why / Why not                                           |
+| ------------- | ------------------------------ | ------------------------------------------------------- |
+| **start()**   | ❌ No                           | The job hasn’t started; context not yet stable.         |
+| **execute()** | ❌ No                           | Active transaction; risk of recursion & resource abuse. |
+| **finish()**  | ✅ Yes                          | Runs after completion, in a clean async context.        |
+
+---
+
+## 🧠 In Short
+
+**Salesforce disallows calling another batch in `start()` or `execute()` because:**
+
+1. It would cause **nested async execution** (unsupported context).
+2. Could create **infinite loops or queue flooding**.
+3. Violates **transaction and governor model isolation**.
+4. **Finish()** runs in a fresh, safe context — so chaining batches here is controlled and stable.
+
+---
+
+Would you like me to show a **diagram of how Salesforce processes batch jobs internally** (with `start → execute → finish → next batch` flow and async queue)?
+It visually makes this super clear.
