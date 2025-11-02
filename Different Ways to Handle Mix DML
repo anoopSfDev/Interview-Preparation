@@ -1,0 +1,123 @@
+What are other ways to handle mix dml excpetion than future methods in salesforce ?
+
+## ✅ Solutions (Besides Future Methods)
+
+Here are **five** practical, safe alternatives you can use depending on your use case:
+---
+### **1. Queueable Apex (Recommended Modern Approach)**
+
+Queueables are the modern replacement for many `@future` use cases.
+They support **chaining**, are **bulkified**, and let you **pass complex types**.
+
+**How it helps:**
+
+* Perform setup-object DML in one transaction.
+* Enqueue a queueable for non-setup object DML (or vice versa).
+
+**Example:**
+
+```apex
+public class SetupBatch implements Queueable {
+    public void execute(QueueableContext context) {
+        // Insert a setup object
+        insert new User(...);
+
+        // Chain next Queueable for non-setup DML
+        System.enqueueJob(new NonSetupBatch());
+    }
+}
+
+public class NonSetupBatch implements Queueable {
+    public void execute(QueueableContext context) {
+        insert new Account(...);
+    }
+}
+```
+
+**✅ Advantages:**
+
+* Easy to chain jobs in sequence.
+* Cleaner control than `@future`.
+* Supports complex logic and better error handling.
+
+---
+
+### **2. Batch Apex (for Large or Sequential Operations)**
+
+If you have a large number of records or multi-step logic:
+
+* Use **Batch Apex** where one batch handles setup objects.
+* Call another batch from the **`finish()`** method for non-setup DML.
+
+**Example:**
+
+```apex
+public void finish(Database.BatchableContext bc) {
+    Database.executeBatch(new NonSetupBatch());
+}
+```
+
+✅ Safe because `finish()` runs in a **new transaction context**.
+
+---
+
+### **3. Platform Events**
+
+If you want **loose coupling** between setup and non-setup operations, you can publish a **Platform Event**.
+
+**Flow:**
+
+* First transaction performs setup DML and publishes an event.
+* A **trigger or flow** on the Platform Event handles non-setup DML asynchronously.
+
+**Example:**
+
+```apex
+// Publish event after setup DML
+SetupEvent__e evt = new SetupEvent__e(UserId__c = user.Id);
+Database.saveResult result = EventBus.publish(evt);
+```
+
+**Subscriber:**
+
+```apex
+trigger NonSetupTrigger on SetupEvent__e (after insert) {
+    for (SetupEvent__e e : Trigger.new) {
+        insert new Account(Name = 'Linked to ' + e.UserId__c);
+    }
+}
+```
+✅ Ideal when you want to decouple logic between two contexts.
+---
+
+### **4. @AuraEnabled / Queueable Hybrid**
+
+In **Lightning or Flow automation**, you can split logic:
+
+* Do setup DML from a **Flow or Apex action**.
+* Then enqueue the next part as a **Queueable Apex**.
+
+Useful in record-triggered flows where **mixed DML** might occur (e.g., creating users when a record changes).
+
+---
+
+### **5. Workflow or Flow Segmentation**
+
+For admin-level solutions (no Apex):
+
+* Perform setup object changes (like User creation) in **one Flow or Process Builder**.
+* Trigger a **Platform Event or Scheduled Path** to handle non-setup DML later.
+
+✅ Declarative workaround when you’re restricted from using code.
+
+---
+
+## ⚙️ Summary Table
+
+| Method                    | Async? | Can Chain?       | When to Use                                 |
+| ------------------------- | ------ | ---------------- | ------------------------------------------- |
+| **Future Method**         | ✅      | ❌                | Simple quick fixes; one-off async DML       |
+| **Queueable Apex**        | ✅      | ✅                | Best modern practice; flexible, chainable   |
+| **Batch Apex**            | ✅      | ✅ (via finish)   | Large data volumes or multi-step processing |
+| **Platform Events**       | ✅      | ✅ (event-driven) | Loose coupling or decoupled processes       |
+| **Flow / Scheduled Path** | ✅      | ✅ (time-based)   | Declarative automation scenarios            |
